@@ -12,6 +12,7 @@ import {
   isFalImageEditModel,
 } from "@omniroute/open-sse/handlers/imageGeneration/providers/fal.ts";
 import { handleLeonardoImageGeneration } from "@omniroute/open-sse/handlers/imageGeneration/providers/leonardo.ts";
+import { editSuccessResponse } from "@/lib/images/editCost";
 import { createInjectionGuard } from "@/middleware/promptInjectionGuard";
 import {
   buildAdobeFireflyEditDataUrls,
@@ -269,6 +270,7 @@ async function handleSyntxEditRequest(params: {
   imageBytes: Buffer | null;
   imageMime: string | null;
   signal: AbortSignal | null;
+  accounting: EditAccountingBase;
 }): Promise<Response> {
   const {
     parsed,
@@ -282,6 +284,7 @@ async function handleSyntxEditRequest(params: {
     imageBytes,
     imageMime,
     signal,
+    accounting,
   } = params;
 
   const preflight = await syntxEditPreflight(parsed.provider, allowedConnections, resolvedModel);
@@ -313,7 +316,12 @@ async function handleSyntxEditRequest(params: {
 
   if ((result as { success?: boolean }).success) {
     await clearRecoveredProviderState(credentials);
-    return jsonResponse((result as { data?: unknown }).data);
+    return editSuccessResponse(
+      accounting,
+      parsed.provider,
+      parsed.model,
+      (result as { data?: unknown }).data
+    );
   }
   return jsonResponse(
     toJsonErrorPayload((result as { error?: unknown }).error, "Image edit provider error"),
@@ -650,8 +658,8 @@ async function executeImageEditCombo(comboName: string, ctx: ImageEditContext): 
     return errorResponse(run.status, `[${run.provider}] ${run.error}`);
   }
   if (run.outcome === "success") {
-    // Match the single-model edit path: return the provider payload directly.
-    return jsonResponse(run.data);
+    // Match the single-model edit path: the provider payload, priced to the target used.
+    return editSuccessResponse(ctx.accounting, run.provider, run.model, run.data);
   }
   const errorPayload = toJsonErrorPayload(
     run.lastError?.error || "All combo targets failed",
@@ -882,7 +890,7 @@ async function postHandler(request: Request, _context?: unknown) {
 
     if (result.success === true) {
       await clearRecoveredProviderState(credentials);
-      return jsonResponse(result.data);
+      return editSuccessResponse(accounting, parsed.provider, parsed.model, result.data);
     }
     return jsonResponse(
       toJsonErrorPayload(result.error, "Image edit provider error"),
@@ -933,7 +941,7 @@ async function postHandler(request: Request, _context?: unknown) {
 
     if (result.success) {
       await clearRecoveredProviderState(credentials);
-      return jsonResponse(result.data);
+      return editSuccessResponse(accounting, parsed.provider, parsed.model, result.data);
     }
     return jsonResponse(
       toJsonErrorPayload(result.error, "Image edit provider error"),
@@ -971,6 +979,7 @@ async function postHandler(request: Request, _context?: unknown) {
       imageBytes,
       imageMime,
       signal: request.signal,
+      accounting,
     });
   }
 
@@ -993,7 +1002,7 @@ async function postHandler(request: Request, _context?: unknown) {
     );
     if (result.success) {
       await clearRecoveredProviderState(preflight.credentials);
-      return jsonResponse(result.data);
+      return editSuccessResponse(accounting, parsed.provider, parsed.model, result.data);
     }
     return jsonResponse(
       toJsonErrorPayload(result.error, "Image edit provider error"),
@@ -1046,7 +1055,7 @@ async function postHandler(request: Request, _context?: unknown) {
 
     if (result.success) {
       await clearRecoveredProviderState(credentials);
-      return jsonResponse(result.data);
+      return editSuccessResponse(accounting, parsed.provider, parsed.model, result.data);
     }
     return jsonResponse(
       toJsonErrorPayload(result.error, "Image edit provider error"),
@@ -1115,7 +1124,7 @@ async function postHandler(request: Request, _context?: unknown) {
 
     if (result.success) {
       if (finalCreds) await clearRecoveredProviderState(finalCreds);
-      return jsonResponse(result.data);
+      return editSuccessResponse(accounting, parsed.provider, parsed.model, result.data);
     }
     return jsonResponse(
       toJsonErrorPayload(result.error, "Image edit provider error"),
@@ -1184,7 +1193,7 @@ async function postHandler(request: Request, _context?: unknown) {
 
   if (result.success) {
     await clearRecoveredProviderState(credentials);
-    return jsonResponse((result as any).data);
+    return editSuccessResponse(accounting, customProviderId, customModel, (result as any).data);
   }
   return jsonResponse(
     toJsonErrorPayload((result as any).error, "Image edit provider error"),
